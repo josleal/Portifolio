@@ -1,0 +1,1194 @@
+---
+title: "Projeto de Ciência de Dados"
+author: "Josué Leal Evangelista"
+date: "18/05/2021"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+#### PROJETO 01: DETECÇÃO DE FRAUDES NO TRÁFEGO DE CLIQUES EM PROPAGANDAS DE APLICAÇÕES MOBILE
+
+![<caption>](TalkingData.jpeg)
+
+A TalkingData (https://www.talkingdata.com), a maior plataforma de big data independente da china, cobre mais de 70% dos dispositivos móveis ativos em todo o país. eles lidam com 3 bilhões de cliques por dia, dos quais 90% são potencialmente fraudulentos. sua abordagem atual para impedir fraudes de cliques para desenvolvedores de aplicativos é medir a jornada do clique de um usuário em todo o portifólio e sinalizar endereços ip produzem muitos cliques, mas nunca acabam instalando aplicativos. com esses informações, eles criaram uma lista negra de ips e uma lista negra de dispositivos. embora bem-sucedidos, eles querem estar sempre um passo à frente dos fraudadores e pretedem desenvolver ainda mais a solução. Então, neste projeto, o objetivo é construir um modelo de aprendizado de máquina para determinar se um clique é fraudulento ou não.
+
+
+#### DICIONÁRIO DE DADOS:
+
+1 - **File descriptions:**
+**train_sample.csv** - 100.000 linhas selecionadas aleatoriamente de dados de treinamento, para inspecionar os dados antes de baixar o conjunto completo.
+
+**test.csv** - conjunto de teste.
+
+**sampleSubmission.csv** - um arquivo de envio de amostra no formato correto.
+
+**test_supplement.csv** - Este é um conjunto de teste maior que foi lançado acidentalmente no ínicio da competição. Não é necessário usar esses dados, mas é permitido fazê-lo. Os dados de teste oficiais são um subconjunto desses dados.
+
+**train.csv** - conjunto de treinamento
+
+2 - Variáveis do arquivo **train.csv**:
+
+**ip** - IP - Endereço de clique
+
+**app** - ID.App - ID de aplicativo para marketing
+
+**device** - Tipo.Dispositivo - Identificação do tipo de dispositivo do telefone celular do usuário
+
+**os** - ID.OS - ID versão do OS
+
+**channel** - ID.Canal.Anuncio - ID do canal do editor de anúncio
+
+**click_time** - Click.Horario - Hora do click (UTC)
+
+**attributed_time** - Hora.Download - Hora do download do aplicativo.
+
+**is_attributed** - Aplicativo.Baixado (variável Target) - Indica se o aplicativo foi baixado (0 = Não baixado, 1 = Baixado)
+
+
+#### **DIRETÓRIO DE TRABALHO E CARREGAMENTO DE BIBLIOTECAS**
+
+
+```{r}
+# DIRETÓRIO DE TRABALHO
+setwd('C:/FCD/DataScienceAcademy/BigDataRAzure/Projeto1')
+getwd()
+```
+
+```{r}
+# DESATIVAR MENSAGENS DE WARNINGS (warn = -1) E ATIVAR (warn = 0)
+options(warn = -1)
+# DESATIVA NOTAÇÃO CIENTÍFICA
+options(scipen = 999)
+```
+
+
+```{r}
+# CARREGANDO BIBLIOTECAS 
+suppressPackageStartupMessages({library(dplyr)
+library(data.table)
+library(tidyr)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(plotly)
+library(gridExtra)
+library(lubridate)
+library(scales)
+library(caTools)})
+```
+
+#### **1 - PRÉ-PROCESSAMENTO DE DADOS**
+
+```{r}
+# CARREGANDO O ARQUIVO train_csv
+#treino_csv <- fread('train.csv')
+```
+
+
+```{r}
+# RENOMEANDO DATASET
+#names(treino_csv) <- c("IP", "ID.App", "Tipo.Dispositivo",
+#                       "ID.OS","ID.Canal.Anuncio","Click.Horario","Hora.Download","Aplicativo.Baixado")
+```
+
+
+```{r}
+# COLETANDO AMOSTRA
+#df_Talking_Data <- sample_n(treino_csv, size = 4500000)
+```
+
+
+```{r}
+# SALVANDO O DATASET
+#write_csv(df_Talking_Data, 'df_Talking_Data.csv')
+```
+
+
+```{r}
+# CARREGANDO df_Talking_Data
+df_Talking_Data <- fread('df_Talking_Data.csv'); glimpse(df_Talking_Data)
+```
+
+
+```{r}
+# QUANTIDADE DE CLASSES
+g0 <- ggplot(df_Talking_Data, aes(x = as.factor(Aplicativo.Baixado))) +
+geom_bar(stat = 'count') +
+coord_cartesian(ylim = c(0, 4500000)) +
+labs(title = "Aplicativo baixado x Não baixado",x = 'Classes', y = 'Frequência')
+ggplotly(g0, width = 400, height = 425)
+```
+
+```{r}
+total.obs <- nrow(df_Talking_Data)
+baixado <- nrow(df_Talking_Data[df_Talking_Data$Aplicativo.Baixado == 1,])
+nao.baixado <- nrow(df_Talking_Data[df_Talking_Data$Aplicativo.Baixado == 0,])
+```
+
+
+```{r}
+percentual.nao.baixado <- nao.baixado/total.obs 
+percentual.baixado <- baixado/total.obs; 
+cat("classe 0 (não baixado)\nPercentual:", round(percentual.nao.baixado*100, 2))
+cat("\n\nclasse 1 (baixado)\nPercentual:",round(percentual.baixado*100, 2))
+```
+
+```{r}
+## SLICE DATASET - APLICATIVO NÃO BAIXADO
+df_nao_baixado <- df_Talking_Data[df_Talking_Data$Aplicativo.Baixado == 0,]
+df_nao_baixado$Aplicativo.Baixado <- as.factor(df_nao_baixado$Aplicativo.Baixado)
+```
+
+
+```{r}
+# FUNÇÃO PARA PLOTAGEM DO GRÁFICO DE BARRAS
+grafico.barras <- function(x, xlab, title){
+    ggplot(x[1:15,], aes(x = reorder(Var1, Freq), y = Freq)) +
+        geom_bar(stat = "identity") + labs(x = xlab, y = "Frequência", title = title) +
+        theme_minimal() +
+        theme(text = element_text(size = 8)) +
+        coord_flip()
+}
+```
+
+
+```{r}
+# IP DE ENDEREÇO DE CLIQUE - ID
+ip <- data.frame(table(df_nao_baixado$IP))
+ip <- ip[order(ip$Freq, decreasing = T),]
+
+# 15 IPS DE ENDEREÇO DE CLIQUES (IP) LIGADOS A CLIQUES QUE NÃO BAIXARAM O APLICATIVO
+g1 = grafico.barras(ip, 'IP', 'IP dos cliques sem download')
+```
+
+
+```{r}
+# ID DE APLICATIVO PARA MARKETING - ID.App
+id.aplicativo <- data.frame(table(df_nao_baixado$ID.App))
+id.aplicativo <- id.aplicativo[order(id.aplicativo$Freq, decreasing = T),]
+
+# 15 IDS DE APLICATIVOS (ID.App) LIGADOS A CLIQUES QUE NÃO BAIXARAM O APLICATIVO
+g2 = grafico.barras(id.aplicativo, 'ID do aplicativo', 'ID do aplicativo de marketing e cliques sem download')
+```
+
+
+```{r}
+# IDENTIFICAÇÃO DO TIPO DISPOSITIVO - Tipo.Dispositivo
+identificacao.dispositivo <- data.frame(table(df_nao_baixado$Tipo.Dispositivo))
+identificacao.dispositivo <- identificacao.dispositivo[order(identificacao.dispositivo$Freq, decreasing = T),]
+
+# 15 TIPOS DE DISPOSITIVOS (Tipo.Dispositivo) LIGADOS A CLIQUES QUE NÃO BAIXARAM O APLICATIVO
+g3 = grafico.barras(identificacao.dispositivo, 'Tipo do dispositivo', 'Tipo dispositivo e cliques sem download')
+```
+
+
+```{r}
+# ID VERSÃO DO SISTEMA OPERACIONAL DO CELULAR DO USUÁRIO - ID.OS
+id.sistema.operacional <- data.frame(table(df_nao_baixado$ID.OS))
+id.sistema.operacional <- id.sistema.operacional[order(id.sistema.operacional$Freq, decreasing = T),]
+
+# 15 IDS VERSÃO DO SISTEMA OPERACIONAL DO CELULAR DO USUÁRIO (ID.OS) LIGADOS A CLIQUES QUE NÃO BAIXARAM O APLICATIVO
+g4 <- grafico.barras(id.sistema.operacional, 'ID do OS', 'ID do OS do usuário e cliques sem download ')
+```
+
+
+```{r}
+# ID DO CANAL DE ANÚNCIOS - ID.Canal.Anuncio
+id.canal <- data.frame(table(df_nao_baixado$ID.Canal.Anuncio))
+id.canal <- id.canal [order(id.canal$Freq, decreasing = T),]
+
+# 15 IDS DE APLICATIVOS (ID.App) LIGADOS A CLIQUES QUE NÃO BAIXARAM O APLICATIVO
+g5 <- grafico.barras(id.canal, "ID Canal Anúncios", 'Canal e cliques sem download')
+```
+
+
+```{r}
+g1; g2; g3; g4; g5
+```
+
+#### **O tipo de dispositivo 1 é o que mais está associado à cliques sem downloads. Os IDs do sistema operacional 19 e 13 são os mais associados à cliques sem downloads. Já o canal mais vulnerável a cliques sem downloads é o 280.**
+
+
+```{r}
+# PERÍODO DE CLIQUES NO DATASET - DATA E HORÁRIO
+# dif_dia <- as.duration(fim-inicio); dif_dia -> outra forma de ver a diferença de dias
+inicio <- min(df_Talking_Data$Click.Horario); cat(sprintf("De: %s",inicio))
+fim <- max(df_Talking_Data$Click.Horario); cat(sprintf("\nAté: %s",fim))
+```
+
+
+```{r}
+# DIFERENÇA EM DIAS
+diferenca_dia <- fim - inicio; diferenca_dia
+```
+
+
+```{r}
+# TABELA COM A FREQUENCIA DE CLIQUES SEM DOWNLOAD EM DETERMINADO HORÁRIO 
+df <- data.frame(table(df_nao_baixado$Click.Horario)); head(df,3)
+df$Var1 <- as_datetime(df$Var1)
+```
+
+
+```{r}
+# ACRESCENTANDO DATA E DIA E HORA (SEM CONTAR MINUTOS E SEGUNDOS)
+df <- df %>%
+    mutate(Data = make_date(year(df$Var1), month(df$Var1), day(df$Var1)),
+           Data.Horario = df$Var1,
+           Freq.Cliques = df$Freq,
+           Dia.Hora = make_datetime(year(df$Var1), month(df$Var1), day(df$Var1), hour(df$Var1)))
+df <- select(df, Data, Data.Horario, Dia.Hora, Freq.Cliques); head(df,3)
+```
+
+
+```{r}
+# AGRUPAMENTO POR DIA E HORA
+df2 <- df %>%
+     group_by(Data,Dia.Hora) %>%
+     summarise(Freq.Cliques = sum(Freq.Cliques),`.groups` = "keep"); head(df2,3)
+```
+
+
+```{r}
+g6 <- ggplot(df2, aes(x = Dia.Hora , y = Freq.Cliques)) +
+geom_line(size = 0.7,colour = 'gold') +                    
+geom_point(size = 1.3, colour = 'black') +
+scale_x_datetime(labels = date_format(format = '%Hh', tz = "UTC"), date_breaks = "3 hours") +
+coord_cartesian(ylim = c(0, 100000)) +
+labs(x = 'Horas', y = 'Frequência de Cliques', title = 'Cliques sem download 06/11/2017 a 09/11/2017')
+ggplotly(g6, width = 800, height = 600)
+```
+
+#### **No gráfico precebe-se que os picos ocorrem de 00h00 às 14h00. Há um enorme crescimento de cliques sem download no período de 21h00 às 00h00 nos dias 6, 7 e 8 e uma queda enorme no período de 15h00 às 20h00 nos dias 6 e 7 e de 15h00 às 16h00 no dia 9.**
+
+```{r}
+# ESTATÍSTICA DE CLIQUES SEM DOWNLOAD POR HORA - DIA 06/11/2017 DE 14h48 ÀS 23h59
+dia06 <- df2[df2$Data == as.Date('2017-11-06'),]
+# ESTATÍSTICA DE CLIQUES FRAUDULENTOS POR HORA - DIA 07/11/2017 DE 00h ÀS 23h59
+dia07 <- df2[df2$Data == as.Date('2017-11-07'),]
+# ESTATÍSTICA DE CLIQUES FRAUDULENTOS POR HORA - DIA 08/11/2017 DE 00h ÀS 23h59
+dia08 <- df2[df2$Data == as.Date('2017-11-08'),]
+# ESTATÍSTICA DE CLIQUES FRAUDULENTOS POR HORA - DIA 09/11/2017 DE 00h ÀS 16h00
+dia09 <- df2[df2$Data == as.Date('2017-11-09'),]
+```
+
+
+```{r}
+cat("Estatísticas cliques sem download:\n\nDia 06-11-2017 das 14h48 às 23h59\n\nMédia de cliques/hora:",mean(dia06$Freq.Cliques),
+"\nMédia de cliques/minuto:", mean(dia06$Freq.Cliques)/60)
+
+cat("\n\nDia 07-11-2017 das 00h às 23h59 \n\nMédia de cliques/hora:", mean(dia07$Freq.Cliques),
+"\nMédia de cliques/minuto:", mean(dia07$Freq.Cliques)/60)
+
+cat("\n\nDia 08-11-2017 das 00h às 23h59 \n\nMédia de cliques/hora:", mean(dia08$Freq.Cliques),
+"\nMédia de cliques/minuto:", mean(dia08$Freq.Cliques)/60)
+
+cat("\n\nDia 09-11-2017 das 00h às 16h00 \n\nMédia de cliques/hora:", mean(dia09$Freq.Cliques),
+"\nMédia de cliques/minuto:", mean(dia09$Freq.Cliques)/60)
+```
+
+#### **No dia 09/11 houve a maior média de cliques por hora. Em 16 horas, a média obtida foi de 75741.65 cliques, o que superou as médias dos dias 07/11 e 08/11 em 24 horas.**
+
+
+```{r}
+# AGRUPAMENTO POR HORA PARA SABER EM QUAL HORÁRIO SE TEM MAIS CLIQUES SEM DOWNLOADS
+df3 <- df %>%
+    separate (col = Dia.Hora, c ("Dia", "Hora"), sep = ' ', remove = TRUE)
+
+df4 <- df3 %>%
+             group_by(Hora) %>%
+             summarise(Horario.Mais.Cliques = sum(Freq.Cliques))
+
+df4 <- df4 %>%
+     separate(col = Hora, c ("Hora", "s", "m"), sep = ':', remove = TRUE) %>%
+     select(Hora, Horario.Mais.Cliques)
+
+head(df4, 5)
+```
+
+
+```{r}
+# HORÁRIOS COM MAIOR VOLUME DE CLIQUES NOS TRÊS DIAS
+g7 <- ggplot(df4, aes(x = Hora, y = Horario.Mais.Cliques)) +                 
+     geom_bar(stat="identity") +
+     labs(x = 'Horário', y = 'Frequência total de Cliques', title = 'Volume total de cliques sem download em cada hora')
+
+ggplotly(g7, width = 800, height = 600)
+```
+
+#### **Nos horários de 00h00 a 15h00 é quando mais se tem cliques sem download.**
+
+```{r}
+# CORRELAÇÃO DE VARIÁVEIS DO DATASET DA AMOSTRA DO DATASET TALKING_DATA
+cor(df_Talking_Data[,-c(6:7)])
+```
+
+
+```{r}
+suppressPackageStartupMessages({library(corrplot)})
+corrplot(cor(df_Talking_Data[,-c(6:7)]), method = "number")
+```
+
+
+```{r}
+df_Talking_Data$Aplicativo.Baixado <- as.factor(df_Talking_Data$Aplicativo.Baixado)
+glimpse(df_Talking_Data)
+```
+
+#### **SEPARANDO DADOS DE TREINO E TESTE**
+
+```{r}
+#split <- sample.split(df_Talking_Data$Aplicativo.Baixado, SplitRatio = 0.7)
+#dados_treino <- subset(df_Talking_Data, split == TRUE)
+#dados_teste <- subset(df_Talking_Data, split == FALSE )
+```
+
+
+```{r}
+# DADOS TREINO 70%
+#glimpse(dados_treino)
+```
+
+
+```{r}
+# DADOS TESTE 30%
+#glimpse(dados_teste)
+```
+
+#### **BALANCEAMENTO DE CLASSES DOS DADOS DE TREINO**
+
+```{r}
+# CARREGANDO BIBLIOTECAS
+#suppressPackageStartupMessages({library(janitor),
+  #library(themis)})
+```
+
+
+```{r}
+#tabyl(dados_treino$Aplicativo.Baixado)
+```
+
+
+```{r}
+# BALANCEAMENTO NOS DADOS DE TREINO (DOWNSAMPLE)
+#dados_treino_down_sample <- recipe (Aplicativo.Baixado~., dados_treino) %>%
+#step_downsample(Aplicativo.Baixado) %>%
+#prep() %>%
+#juice() 
+```
+
+
+```{r}
+#tabyl(dados_treino_down_sample$Aplicativo.Baixado)
+```
+
+
+```{r}
+# REMOVENDO AS VARIÁVEIS Click.Horario e Hora.Download DO DATASET DE TREINO BALANCEADO
+#dados_treino_down_sample <- select(dados_treino_down_sample, -Click.Horario, -Hora.Download)
+# DADOS TREINO BALANCEADO
+#glimpse(dados_treino_down_sample)
+```
+
+
+```{r}
+# REMOVENDO AS VARIÁVEIS Click.Horario e Hora.Download DO DATASET DE TESTE
+#dados_teste_final <- select(dados_teste, -Click.Horario, -Hora.Download)
+# DADOS TREINO BALANCEADO
+#glimpse(dados_teste_final)
+```
+
+
+```{r}
+# SALVANDO DADOS DE TREINO (dados_treino_down_sample) E TESTE (dados_teste_final)
+#write_csv(dados_treino_down_sample, "dados_treino_down_sample.csv")
+#write_csv(dados_teste_final, "dados_teste_final.csv")
+```
+
+
+```{r}
+# CARREGANDO DADOS DE TREINO
+dados_treino_down_sample <- fread("dados_treino_down_sample.csv")
+dados_treino_down_sample <- as.data.frame(dados_treino_down_sample)
+dados_treino_down_sample$Aplicativo.Baixado <- as.factor(dados_treino_down_sample$Aplicativo.Baixado)
+glimpse(dados_treino_down_sample)
+```
+
+
+```{r}
+# CARREGANDO DADOS DE TESTE
+dados_teste_final <- fread("dados_teste_final.csv")
+dados_teste_final <- as.data.frame(dados_teste_final)
+dados_teste_final$Aplicativo.Baixado <- as.factor(dados_teste_final$Aplicativo.Baixado)
+glimpse(dados_teste_final)
+```
+
+#### **2 - APRENDIZADO**
+
+### **MODELO 1 - REGRESSÃO LOGÍSTICA (pacote:caret)**
+
+```{r}
+# CARREGANDO BIBLIOTECA
+suppressPackageStartupMessages({library(caret)})
+```
+
+
+```{r}
+# MODELO
+modelo.rl <- glm(formula = Aplicativo.Baixado ~ ., data = dados_treino_down_sample, family = "binomial")
+```
+
+
+```{r}
+# VISUALIZAÇÃO DO MODELO
+summary(modelo.rl)
+```
+
+
+```{r}
+# PREVISÃO DO MODELO
+previsao.modelo.rl <- predict(modelo.rl, dados_teste_final, type = "response")
+```
+
+```{r}
+# AVALIAÇÃO DO MODELO
+# MATRIZ DE CONFUSÃO
+matriz_confusao1 <- table(Previsto = as.factor(round(previsao.modelo.rl)), Reference = dados_teste_final$Aplicativo.Baixado)
+matriz_confusao1
+```
+
+```{r}
+# MATRIZ DE CONFUSÃO (OUTRA FORMA COM O PACOTE caret)
+matriz_confusao1.1 <- confusionMatrix(as.factor(round(previsao.modelo.rl)), dados_teste_final$Aplicativo.Baixado)
+matriz_confusao1.1
+```
+
+#### **MÉTRICAS  DO MODELO DE REGRESSÃO LOGÍSTICA**
+
+```{r}
+# ACURÁCIA (ACCURACY) - MEDE A PRECISÃO DO MODELO DE CLASSIFICAÇÃO. QUANTO MAIOR MELHOR.
+# TRUE POSITIVO = TP
+# TRUE NEGATIVO = TN
+# FALSO POSITIVO = FP
+# FALSO NEGATIVO = FN
+
+# ACCURACY
+# TP + TN/ TP + TN + FP + FN
+Acuracia1 <- (matriz_confusao1[1,1] + matriz_confusao1[2,2])/(matriz_confusao1[1,1] + matriz_confusao1[2,2]
+                                                              + matriz_confusao1[1,2] +matriz_confusao1[2,1])
+
+# PRECISÃO (PRECISION) - PROPORÇÃO DE RESULTADOS VERDADEIROS SOBRE OS POSITIVOS. QUANTO MAIOR MELHOR.
+# TP/(TP + FP)
+precisao1 <- matriz_confusao1[1,1]/(matriz_confusao1[1,1] + matriz_confusao1[1,2])
+
+# RECALL - FRAÇÃO DE RESULTADOS CORRETOS RETORNADO PELO MODELO. QUANTO MAIOR MELHOR.
+# TP/(TP + FN)
+recall1 <- matriz_confusao1[1,1] / (matriz_confusao1[1,1] + matriz_confusao1[2,1])
+
+# F1 SCORE - MÉDIA PODERADA ENTRE A PRECISÃO E RECALL. O VALOR IDEAL PARA O F-SCORE É IGUAL A 1.
+# 2*TP / (2 * TP + TP + TP) OU 2 * PRECISÃO * RECALL/ (PRECISÃO + RECALL)
+f1_score1 <- 2 * precisao1 * recall1/(precisao1 + recall1)
+```
+
+
+```{r}
+cat("Modelo de Regressão Logística\n\nAcurácia:", round(Acuracia1,4),
+    "\nRecall:", round(recall1,4),
+    "\nPrecisão:", round(precisao1,4),
+    "\nF1 Score:", round(f1_score1,4))
+```
+
+
+```{r}
+# CURVA ROC 
+# AUC - QUANTO MAIS A ESQUERDA ESTIVER A CURVA, MAIOR A PRECISÃO DO MODELO
+# install.packages("ROCR")
+suppressPackageStartupMessages({library(ROCR)})
+source("plot_utils.R") 
+```
+
+```{r}
+previsao1 <- prediction(previsao.modelo.rl, dados_teste_final$Aplicativo.Baixado)
+```
+
+
+```{r}
+plot.roc.curve(previsao1, title.text = "Curva ROC")
+plot.pr.curve(previsao1, title.text = "Curva Precision/Recall")
+```
+
+
+### **MODELO 2 - NAIVE BAYES (pacote:e1071)**
+
+```{r}
+# CARREGANDO BIBLIOTECA
+suppressPackageStartupMessages({library(e1071)})
+```
+
+
+```{r}
+# MODELO
+modelo.naivebayes <- naiveBayes(Aplicativo.Baixado ~ ., data = dados_treino_down_sample)
+```
+
+
+```{r}
+# VISUALIZAÇÃO DO MODELO
+summary(modelo.naivebayes)
+```
+
+
+```{r}
+# PREVISÃO DO MODELO
+previsao.modelo.naivebayes <- predict(modelo.naivebayes, dados_teste_final)
+```
+
+```{r}
+# MATRIZ DE CONFUSÃO
+matriz_confusao2 <- table(Previsto = previsao.modelo.naivebayes, Reference = dados_teste_final$Aplicativo.Baixado)
+matriz_confusao2
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO (OUTRA FORMA COM O PACOTE caret)
+library(caret)
+matriz_confusao2.1 <- confusionMatrix(previsao.modelo.naivebayes, dados_teste_final$Aplicativo.Baixado)
+matriz_confusao2.1
+```
+
+#### **MÉTRICAS  DO MODELO NAIVE BAYES**
+
+```{r}
+# ACURÁCIA (ACCURACY) - MEDE A PRECISÃO DO MODELO DE CLASSIFICAÇÃO. QUANTO MAIOR MELHOR.
+# TRUE POSITIVO = TP
+# TRUE NEGATIVO = TN
+# FALSO POSITIVO = FP
+# FALSO NEGATIVO = FN
+
+# ACCURACY
+# TP + TN/ TP + TN + FP + FN
+
+Acuracia2 <- (matriz_confusao2[1,1] + matriz_confusao2[2,2])/(matriz_confusao2[1,1] + matriz_confusao2[2,2] + 
+matriz_confusao2[1,2] + matriz_confusao2[2,1])
+
+# PRECISÃO
+# TP/(TP + FP)
+precisao2 <- matriz_confusao2[1,1]/(matriz_confusao2[1,1] + matriz_confusao2[1,2])
+
+# RECALL 
+# TP/(TP + FN)
+recall2 <- matriz_confusao2[1,1] / (matriz_confusao2[1,1] + matriz_confusao2[2,1])
+
+# F1 SCORE
+# 2*TP / (2 * TP + FP + FN) OU 2 * PRECISÃO * RECALL/ (PRECISÃO + RECALL)
+f1_score2 <- 2 * precisao2 * recall2/(precisao2 + recall2)
+```
+
+
+```{r}
+cat("Modelo Naive Bayes\n\nAcurácia:", round(Acuracia2,4),
+    "\nRecall:", round(recall2,4),
+    "\nPrecisão:", round(precisao2,4),
+    "\nF1 Score:", round(f1_score2,4))
+```
+
+
+```{r}
+# CURVA ROC 
+# AUC - QUANTO MAIS A ESQUERDA ESTIVER A CURVA, MAIOR A PRECISÃO DO MODELO
+previsao2 <- prediction(as.double(previsao.modelo.naivebayes), dados_teste_final$Aplicativo.Baixado)
+```
+
+
+```{r}
+plot.roc.curve(previsao2, title.text = "Curva ROC")
+plot.pr.curve(previsao2, title.text = "Curva Precision/Recall")
+```
+
+### **MODELO 3 - SUPPORT VECTOR MACHINES (pacote:e1071)**
+
+```{r}
+# MODELO
+modelo.svm.e1071 <- svm(Aplicativo.Baixado ~ ., data = dados_treino_down_sample, type = 'C-classification', kernel = 'radial')
+```
+
+
+```{r}
+# VISUALIZAÇÃO DO MODELO
+summary(modelo.svm.e1071)
+```
+
+
+```{r}
+# PREVISÃO DO MODELO
+previsao.modelo.svm.e1071 <- predict(modelo.svm.e1071, dados_teste_final) 
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO
+matriz_confusao3 <- table(Previsto = previsao.modelo.svm.e1071, Reference = dados_teste_final$Aplicativo.Baixado)
+matriz_confusao3
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO (OUTRO FORMA COM O PACOTE caret)
+matriz_confusao3.1 <- confusionMatrix(previsao.modelo.svm.e1071, dados_teste_final$Aplicativo.Baixado)
+matriz_confusao3.1
+```
+#### **MÉTRICAS  DO MODELO SVM e1071**
+
+```{r}
+# ACURÁCIA (ACCURACY) - MEDE A PRECISÃO DO MODELO DE CLASSIFICAÇÃO. QUANTO MAIOR MELHOR.
+# TRUE POSITIVO = TP
+# TRUE NEGATIVO = TN
+# FALSO POSITIVO = FP
+# FALSO NEGATIVO = FN
+
+# ACCURACY
+# TP + TN/ TP + TN + FP + FN
+Acuracia3 <- (matriz_confusao3[1,1] + matriz_confusao3[2,2])/(matriz_confusao3[1,1] + matriz_confusao3[2,2] + 
+matriz_confusao3[1,2] + matriz_confusao3[2,1])
+
+# PRECISÃO
+# TP/(TP + FP)
+precisao3 <- matriz_confusao3[1,1]/(matriz_confusao3[1,1] + matriz_confusao3[1,2])
+
+# RECALL 
+# TP/(TP + FN)
+recall3 <- matriz_confusao3[1,1] / (matriz_confusao3[1,1] + matriz_confusao3[2,1])
+
+# F1 SCORE
+# 2*TP / (2 * TP + FP + FN) OU 2 * PRECISÃO * RECALL/ (PRECISÃO + RECALL)
+f1_score3 <- 2 * precisao3 * recall3/(precisao3 + recall3)
+```
+
+
+```{r}
+cat("Modelo SVM e1071\n\nAcurácia:", round(Acuracia3,4),
+    "\nRecall:", round(recall3,4),
+    "\nPrecisão:", round(precisao3,4),
+    "\nF1 Score:", round(f1_score3,4))
+```
+
+
+```{r}
+# CURVA ROC 
+# AUC - QUANTO MAIS A ESQUERDA ESTIVER A CURVA, MAIOR A PRECISÃO DO MODELO
+previsao3 <- prediction(as.numeric(previsao.modelo.svm.e1071), dados_teste_final$Aplicativo.Baixado)
+```
+
+
+```{r}
+plot.roc.curve(previsao3, title.text = "Curva ROC")
+plot.pr.curve(previsao3, title.text = "Curva Precision/Recall")
+```
+
+
+### **MODELO 4 - SUPPORT VECTOR MACHINES (pacote:kernlab)**
+
+```{r}
+# CARREGANDO BIBLIOTECA
+suppressPackageStartupMessages({library(kernlab)})
+```
+
+
+```{r}
+# MODELO
+modelo.svm.kernlab <- ksvm(Aplicativo.Baixado ~., data = dados_treino_down_sample, kernel = "vanilladot")
+```
+
+
+```{r}
+# VISUALIZAÇÃO DO MODELO
+summary(modelo.svm.kernlab)
+```
+
+
+```{r}
+# PREVISÃO DO MODELO
+previsao.modelo.svm.kernlab <- predict(modelo.svm.kernlab, dados_teste_final)
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO
+matriz_confusao4 <- table(Previsto = previsao.modelo.svm.kernlab, Reference = dados_teste_final$Aplicativo.Baixado)
+matriz_confusao4 
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO (OUTRO FORMA COM O PACOTE caret)
+library(caret)
+matriz_confusao4.1 <- confusionMatrix(previsao.modelo.svm.kernlab, dados_teste_final$Aplicativo.Baixado)
+matriz_confusao4.1
+```
+
+#### **MÉTRICAS  DO MODELO SVM kernlab**
+
+```{r}
+# ACURÁCIA (ACCURACY) - MEDE A PRECISÃO DO MODELO DE CLASSIFICAÇÃO. QUANTO MAIOR MELHOR.
+# TRUE POSITIVO = TP
+# TRUE NEGATIVO = TN
+# FALSO POSITIVO = FP
+# FALSO NEGATIVO = FN
+
+# ACCURACY
+# TP + TN/ TP + TN + FP + FN
+Acuracia4 <- (matriz_confusao4[1,1] + matriz_confusao4[2,2])/(matriz_confusao4[1,1] + matriz_confusao4[2,2] + 
+matriz_confusao4[1,2] + matriz_confusao4[2,1])
+
+# PRECISÃO
+# TP/(TP + FP)
+precisao4 <- matriz_confusao4[1,1]/(matriz_confusao4[1,1] + matriz_confusao4[1,2])
+
+# RECALL 
+# TP/(TP + FN)
+recall4 <- matriz_confusao4[1,1] / (matriz_confusao4[1,1] + matriz_confusao4[2,1])
+
+# F1 SCORE
+# 2*TP / (2 * TP + FP + FN) OU 2 * PRECISÃO * RECALL/ (PRECISÃO + RECALL)
+f1_score4 <- 2 * precisao4 * recall4/(precisao4 + recall4)
+```
+
+
+```{r}
+cat("Modelo SVM kernlab\n\nAcurácia:", round(Acuracia4,4),
+    "\nRecall:", round(recall4,4),
+    "\nPrecisão:", round(precisao4,4),
+    "\nF1 Score:", round(f1_score4,4))
+```
+
+
+```{r}
+# CURVA ROC 
+# AUC - QUANTO MAIS A ESQUERDA ESTIVER A CURVA, MAIOR A PRECISÃO DO MODELO
+previsao4 <- prediction(as.double(previsao.modelo.svm.kernlab), dados_teste_final$Aplicativo.Baixado)
+```
+
+
+```{r}
+plot.roc.curve(previsao4, title.text = "Curva ROC")
+plot.pr.curve(previsao4, title.text = "Curva Precision/Recall")
+```
+
+
+### **MODELO 5 - KNN (pacote:class)**
+
+```{r}
+# CARREGANDO PACOTE
+suppressPackageStartupMessages({library(class)})
+```
+
+
+```{r}
+# MODELO E PREVISÃO
+modelo.knn <- knn(train = dados_treino_down_sample, 
+                     test = dados_teste_final,
+                     cl = dados_treino_down_sample$Aplicativo.Baixado, 
+                     k = 15)
+```
+
+
+```{r}
+# VISUALIZAÇÃO DO MODELO
+summary(modelo.knn)
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO
+matriz_confusao5 <- table(Previsto = modelo.knn, Reference = dados_teste_final$Aplicativo.Baixado)
+matriz_confusao5
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO (OUTRO FORMA COM O PACOTE caret)
+library(caret)
+matriz_confusao5.1 <- confusionMatrix(modelo.knn, dados_teste_final$Aplicativo.Baixado)
+matriz_confusao5.1
+```
+
+
+#### **MÉTRICAS  DO MODELO KNN**
+
+```{r}
+# ACURÁCIA (ACCURACY) - MEDE A PRECISÃO DO MODELO DE CLASSIFICAÇÃO. QUANTO MAIOR MELHOR.
+# TRUE POSITIVO = TP
+# TRUE NEGATIVO = TN
+# FALSO POSITIVO = FP
+# FALSO NEGATIVO = FN
+
+# ACCURACY
+# TP + TN/ TP + TN + FP + FN
+Acuracia5 <- (matriz_confusao5[1,1] + matriz_confusao5[2,2])/(matriz_confusao5[1,1] + matriz_confusao5[2,2] + 
+matriz_confusao5[1,2] + matriz_confusao5[2,1])
+
+# PRECISÃO
+# TP/(TP + FP)
+precisao5 <- matriz_confusao5[1,1]/(matriz_confusao5[1,1] + matriz_confusao5[1,2])
+
+# RECALL 
+# TP/(TP + FN)
+recall5 <- matriz_confusao5[1,1] / (matriz_confusao5[1,1] + matriz_confusao5[2,1])
+
+# F1 SCORE
+# 2*TP / (2 * TP + FP + FN) OU 2 * PRECISÃO * RECALL/ (PRECISÃO + RECALL)
+f1_score5 <- 2 * precisao4 * recall5/(precisao5 + recall5)
+```
+
+
+```{r}
+cat("Modelo KNN\n\nAcurácia:", round(Acuracia5,4),
+    "\nRecall:", round(recall5,4),
+    "\nPrecisão:", round(precisao5,4),
+    "\nF1 Score:", round(f1_score5,4))
+```
+
+
+```{r}
+# CURVA ROC 
+# AUC - QUANTO MAIS A ESQUERDA ESTIVER A CURVA, MAIOR A PRECISÃO DO MODELO
+previsao5 <- prediction(as.double(modelo.knn), dados_teste_final$Aplicativo.Baixado)
+```
+
+
+```{r}
+plot.roc.curve(previsao5, title.text = "Curva ROC")
+plot.pr.curve(previsao5, title.text = "Curva Precision/Recall")
+```
+
+
+### **MODELO 6 - ÁRVORE DE DECISÃO (pacote:rpart)**
+
+```{r}
+# CARREGANDO PACOTE
+suppressPackageStartupMessages({library(rpart)})
+```
+
+
+```{r}
+# MODELO
+modelo.arvore.decisao <- rpart(Aplicativo.Baixado ~ . , method = 'class', data = dados_treino_down_sample)
+```
+
+
+```{r}
+# EXAMINANDO O RESULTADO DO MODELO DA ÁRVORE DE DECISÃO printcp()
+printcp(modelo.arvore.decisao)
+```
+
+
+```{r}
+# OUTRA FORMA DE PLOTAR A ÁRVORE DE DECISÃO - FORMA MAIS AMIGÁVEL
+#suppressPackageStartupMessages({install.packages('rpart.plot')})
+suppressPackageStartupMessages({library(rpart.plot)})
+prp(modelo.arvore.decisao)
+```
+
+
+```{r}
+# PREVISÃO DO MODELO
+previsao.modelo.arvore.decisao <- predict(modelo.arvore.decisao, dados_teste_final, type='class')
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO
+matriz_confusao6 <- table(Previsto = previsao.modelo.arvore.decisao, 
+                          Reference = dados_teste_final$Aplicativo.Baixado)
+matriz_confusao6
+```
+
+
+#### **MÉTRICAS DO MODELO DE ÁRVORE DE DECISÃO**
+
+```{r}
+# ACURÁCIA (ACCURACY) - MEDE A PRECISÃO DO MODELO DE CLASSIFICAÇÃO. QUANTO MAIOR MELHOR.
+# TRUE POSITIVO = TP
+# TRUE NEGATIVO = TN
+# FALSO POSITIVO = FP
+# FALSO NEGATIVO = FN
+
+# ACCURACY
+# TP + TN/ TP + TN + FP + FN
+Acuracia6 <- (matriz_confusao6[1,1] + matriz_confusao6[2,2])/(matriz_confusao6[1,1] + matriz_confusao6[2,2] + 
+matriz_confusao6[1,2] + matriz_confusao6[2,1])
+
+# PRECISÃO
+# TP/(TP + FP)
+precisao6 <- matriz_confusao6[1,1]/(matriz_confusao6[1,1] + matriz_confusao6[1,2])
+
+# RECALL 
+# TP/(TP + FN)
+recall6 <- matriz_confusao6[1,1] / (matriz_confusao6[1,1] + matriz_confusao6[2,1])
+
+# F1 SCORE
+# 2*TP / (2 * TP + FP + FN) OU 2 * PRECISÃO * RECALL/ (PRECISÃO + RECALL)
+f1_score6 <- 2 * precisao6 * recall6/(precisao6 + recall6)
+```
+
+
+```{r}
+cat("Modelo Árvore de Decisão\n\nAcurácia:", round(Acuracia6,4),
+    "\nRecall:", round(recall6,4),
+    "\nPrecisão:", round(precisao6,4),
+    "\nF1 Score:", round(f1_score6,4))
+```
+
+
+```{r}
+# CURVA ROC 
+# AUC - QUANTO MAIS A ESQUERDA ESTIVER A CURVA, MAIOR A PRECISÃO DO MODELO
+previsao6 <- prediction(as.double(previsao.modelo.arvore.decisao), dados_teste_final$Aplicativo.Baixado)
+```
+
+
+```{r}
+plot.roc.curve(previsao6, title.text = "Curva ROC")
+plot.pr.curve(previsao6, title.text = "Curva Precision/Recall")
+```
+
+### **MODELO 7 - RANDOM FOREST (pacote:rpart)**
+
+```{r}
+# MODELO
+modelo.randomforest.rpart = rpart(Aplicativo.Baixado ~ ., data = dados_treino_down_sample, control = rpart.control(cp = .0005))
+```
+
+
+```{r}
+# VISUALIZAÇÃO DO MODELO
+#summary(modelo.randomforest.rpart)
+```
+
+
+```{r}
+# PREVISAO DO MODELO
+previsao.modelo.randomforest.rpart = predict(modelo.randomforest.rpart, dados_teste_final, type='class')
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO
+matriz_confusao7 <- table(Previsto = previsao.modelo.randomforest.rpart, Reference = dados_teste_final$Aplicativo.Baixado)
+matriz_confusao7
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO (OUTRA FORMA COM O PACOTE caret)
+matriz_confusao7.1 <- confusionMatrix(previsao.modelo.randomforest.rpart, dados_teste_final$Aplicativo.Baixado)
+matriz_confusao7.1
+```
+
+#### **MÉTRICAS DO MODELO RANDOM FOREST rpart**
+
+```{r}
+# ACURÁCIA (ACCURACY) - MEDE A PRECISÃO DO MODELO DE CLASSIFICAÇÃO. QUANTO MAIOR MELHOR.
+# TRUE POSITIVO = TP
+# TRUE NEGATIVO = TN
+# FALSO POSITIVO = FP
+# FALSO NEGATIVO = FN
+
+# ACCURACY
+# TP + TN/ TP + TN + FP + FN
+Acuracia7 <- (matriz_confusao7[1,1] + matriz_confusao7[2,2])/(matriz_confusao7[1,1] + matriz_confusao7[2,2] + 
+matriz_confusao7[1,2] + matriz_confusao7[2,1])
+
+# PRECISÃO
+# TP/(TP + FP)
+precisao7 <- matriz_confusao7[1,1]/(matriz_confusao7[1,1] + matriz_confusao7[1,2])
+
+# RECALL 
+# TP/(TP + FN)
+recall7 <- matriz_confusao7[1,1] / (matriz_confusao7[1,1] + matriz_confusao7[2,1])
+
+# F1 SCORE
+# 2*TP / (2 * TP + FP + FN) OU 2 * PRECISÃO * RECALL/ (PRECISÃO + RECALL)
+f1_score7 <- 2 * precisao7 * recall7/(precisao7 + recall7)
+```
+
+
+```{r}
+cat("Modelo Random Forest rpart\n\nAcurácia:", round(Acuracia7,4),
+    "\nRecall:", round(recall7,4),
+    "\nPrecisão:", round(precisao7,4),
+    "\nF1 Score:", round(f1_score7,4))
+```
+
+
+```{r}
+# CURVA ROC 
+# AUC - QUANTO MAIS A ESQUERDA ESTIVER A CURVA, MAIOR A PRECISÃO DO MODELO
+previsao7 <- prediction(as.numeric(previsao.modelo.randomforest.rpart), dados_teste_final$Aplicativo.Baixado)
+```
+
+
+```{r}
+plot.roc.curve(previsao7, title.text = "Curva ROC")
+plot.pr.curve(previsao7, title.text = "Curva Precision/Recall")
+```
+
+### **MODELO 8 - RANDOM FOREST (pacote: randomForest)**
+
+```{r}
+# CARREGANDO O PACOTE
+suppressPackageStartupMessages({library(randomForest)})
+```
+
+
+```{r}
+# MODELO
+#modelo.randomforest.randomForest <- randomForest(Aplicativo.Baixado ~ ., 
+#                                                 data = dados_treino_down_sample,  ntree = 500, nodesize = 10)
+```
+
+
+```{r}
+# SALVANDO O MODELO TREINADO
+#saveRDS(modelo.randomforest.randomForest, "modelo.randomforest.randomForest.rds")
+```
+
+
+```{r}
+# CARREGANDO O MODELO TREINADO
+modelo.randomforest.randomForest <- readRDS("modelo.randomforest.randomForest.rds")
+```
+
+
+```{r}
+# VISUALIZANDO O MODELO
+print(modelo.randomforest.randomForest)
+```
+
+```{r}
+# PREVISAO DO MODELO
+previsao.modelo.randomforest.randomForest = predict(modelo.randomforest.randomForest, dados_teste_final)
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO
+matriz_confusao8 <- table(Previsto = previsao.modelo.randomforest.randomForest,
+                          Reference = dados_teste_final$Aplicativo.Baixado)
+matriz_confusao8
+```
+
+
+```{r}
+# MATRIZ DE CONFUSÃO (OUTRA FORMA COM O PACOTE caret)
+matriz_confusao8.1 <- confusionMatrix(previsao.modelo.randomforest.randomForest,
+                                      dados_teste_final$Aplicativo.Baixado)
+matriz_confusao8.1
+```
+
+
+#### **MÉTRICAS  DO MODELO RANDOM FOREST randomForest**
+
+```{r}
+# ACURÁCIA (ACCURACY) - MEDE A PRECISÃO DO MODELO DE CLASSIFICAÇÃO. QUANTO MAIOR MELHOR.
+# TRUE POSITIVO = TP
+# TRUE NEGATIVO = TN
+# FALSO POSITIVO = FP
+# FALSO NEGATIVO = FN
+
+# ACCURACY
+# TP + TN/ TP + TN + FP + FN
+Acuracia8 <- (matriz_confusao8[1,1] + matriz_confusao8[2,2])/(matriz_confusao8[1,1] + matriz_confusao8[2,2] + 
+matriz_confusao8[1,2] + matriz_confusao8[2,1])
+
+# PRECISÃO
+# TP/(TP + FP)
+precisao8 <- matriz_confusao8[1,1]/(matriz_confusao8[1,1] + matriz_confusao8[1,2])
+
+# RECALL 
+# TP/(TP + FN)
+recall8 <- matriz_confusao8[1,1] / (matriz_confusao8[1,1] + matriz_confusao8[2,1])
+
+# F1 SCORE
+# 2*TP / (2 * TP + FP + FN) OU 2 * PRECISÃO * RECALL/ (PRECISÃO + RECALL)
+f1_score8 <- 2 * precisao8 * recall8/(precisao8 + recall8)
+```
+
+
+```{r}
+cat("Modelo Random Forest rpart\n\nAcurácia:", round(Acuracia8,4),
+    "\nRecall:", round(recall8,4),
+    "\nPrecisão:", round(precisao8,4),
+    "\nF1 Score:", round(f1_score8,4))
+```
+
+
+```{r}
+# CURVA ROC 
+# AUC - QUANTO MAIS A ESQUERDA ESTIVER A CURVA, MAIOR A PRECISÃO DO MODELO
+previsao8 <- prediction(as.numeric(previsao.modelo.randomforest.randomForest), dados_teste_final$Aplicativo.Baixado)
+```
+
+
+```{r}
+plot.roc.curve(previsao8, title.text = "Curva ROC")
+plot.pr.curve(previsao8, title.text = "Curva Precision/Recall")
+```
+
+
+```{r}
+Modelo = c('Regressao Logistica','Naive Bayes','SVM','SVM','KNN','Decision tree','Random Forest','Random Forest')
+Pacote = c('caret', 'e1071', 'e1071', 'kernlab', 'class', 'rpart', 'rpart', 'randomForest')
+TP = c(matriz_confusao1[1,1], matriz_confusao2[1,1], matriz_confusao3[1,1], matriz_confusao4[1,1], matriz_confusao5[1,1],
+      matriz_confusao6[1,1], matriz_confusao7[1,1], matriz_confusao8[1,1])
+
+TN = c(matriz_confusao1[2,2], matriz_confusao2[2,2], matriz_confusao3[2,2], matriz_confusao4[2,2], matriz_confusao5[2,2],
+      matriz_confusao6[2,2], matriz_confusao7[2,2], matriz_confusao8[2,2])
+
+FP = c(matriz_confusao1[1,2], matriz_confusao2[1,2], matriz_confusao3[1,2], matriz_confusao4[1,2], matriz_confusao5[1,2],
+      matriz_confusao6[1,2], matriz_confusao7[1,2], matriz_confusao8[1,2])
+
+FN = c(matriz_confusao1[2,1], matriz_confusao2[2,1], matriz_confusao3[2,1], matriz_confusao4[2,1], matriz_confusao5[2,1],
+      matriz_confusao6[2,1], matriz_confusao7[2,1], matriz_confusao8[2,1])
+
+Acuracia = c(Acuracia1, Acuracia2, Acuracia3, Acuracia4, Acuracia5, Acuracia6, Acuracia7, Acuracia8)
+Precisao = c(precisao1, precisao2, precisao3, precisao4, precisao5, precisao6, precisao7, precisao8)
+Recall = c(recall1, recall2, recall3, recall4, recall5, recall6, recall7, recall8)
+f1_score = c(f1_score1, f1_score2, f1_score3, f1_score4, f1_score5, f1_score6, f1_score7, f1_score8)
+
+Tabela = data.frame(Modelo, Pacote, TP, TN, FP, FN, Acuracia, Precisao, Recall, f1_score)
+Tabela[order(Tabela$Acuracia, Tabela$TP, decreasing = T),]
+```
+
+
+##### TP = APLICATIVO NÃO FOI BAIXADO E O CLASSIFICOU COMO NÃO BAIXADO (ACERTO)
+##### TN = APLICATIVO FOI BAIXADO E O MODELO CLASSIFICOU COMO BAIXADO (ACERTOU)
+##### FP = APLICATIVO FOI BAIXADO E O MODELO CLASSIFICOU COMO NÃO BAIXADO (ERROU)
+##### FN = APLICATIVO NÃO FOI BAIXADO E O MODELO CLASSIFICOU COMO BAIXADO (ERROU)
+
+
+A Decision Tree obteve a maior acurácia e o número de True Positivo (TP) maior que todos os outros modelos e a terceira maior AUC, com 0.89. embora a Decision Tree tenha a maior acurácia e a maior quantidade de True Positivos, os dois modelos Random Forest (7 e 8) obtiveram valores parecidos (precisão, recall e f1 score), porém com a AUC superior ao Decision Tree, com 0.91 cada. também obtiveram um número de Falsos Positivos (FP) menor.
+
+Penso que com o número de Falsos Positivos menor (FP), a empresa poderia estar colocando em sua lista negra **menos** IPs de cliques que baixaram o aplicativo, mas que foram classificados como cliques que não baixaram.
+
+
+EX. FP (aplicativo foi baixado e o modelo classificou como não baixado)
+
+Decision tree - rpart
+593/3325 = 17,83%
+
+Random Forest - rpart 
+465/3325 = 13,98%
+(O modelo 7 foi o que escolhi, pois teve uma das melhores acurácias e o segundo menor FP e FN)
+
+Random Forest - randomForest 
+435/3325 = 13,08%
+
+
+
+
