@@ -1,3 +1,3 @@
 ### Portifolio
 
-Projetos de ciência de dados.
+Projetos de ciência de dados com R e Python.
